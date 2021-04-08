@@ -52,6 +52,29 @@ class DHL extends AbstractTracker
 
 
     /**
+     * Get the contents of the given url.
+     *
+     * @param string $url
+     *
+     * @return string
+     */
+    protected function fetch($url)
+    {
+        if ($this->defaultDataProvider !== 'guzzle') {
+            return $this->getDataProvider()->get($url);
+        }
+
+        return $this->getDataProvider()->get($url, [
+                'timeout' => 5,
+                'headers' => [
+                    'User-Agent' => 'tracking/1.0',
+                    'Accept' => 'text/html',
+                ]]
+        );
+    }
+
+
+    /**
      * @param string $contents
      *
      * @return Track
@@ -153,7 +176,7 @@ class DHL extends AbstractTracker
         }
 
         $matched = preg_match(
-            "/initialState: JSON\.parse\((.*)\)\,/m", $scriptTags->item(0)->nodeValue, $matches
+            "/initialState: JSON\.parse\((.*)\)\,/m", $scriptTags->item(2)->nodeValue, $matches
         );
 
         if ($matched !== 1) {
@@ -198,7 +221,8 @@ class DHL extends AbstractTracker
                 'wird in eine PACKSTATION weitergeleitet',
                 'Die Sendung wurde abgeholt',
                 'im Export-Paketzentrum bearbeitet',
-                'Sendung wird ins Zielland transportiert und dort an die Zustellorganisation',
+                'Sendung wird ins Zielland',
+                'will be transported to the destination country',
                 'vom Absender in der Filiale eingeliefert',
                 'Sendung konnte nicht in die PACKSTATION eingestellt werden und wurde in eine Filiale',
                 'Sendung konnte nicht zugestellt werden und wird jetzt zur Abholung in die Filiale/Agentur gebracht',
@@ -215,8 +239,14 @@ class DHL extends AbstractTracker
                 'A 2nd attempt at delivery is being made',
                 'Es erfolgt ein 2. Zustellversuch',
                 'Sendung wurde elektronisch angekündigt',
-                'Sendung wurde an DHL übergeben',
+                'sendung wurde an DHL übergeben',
                 'Sendung ist in der Region des Empfängers angekommen',
+                'Die Zustellung an einen gewünschten Ablageort/Nachbarn wurde gewählt',
+                'There is a preferred location/neighbour for this item',
+                'Die Sendung wurde für den Weitertransport vorbereitet',
+                'The shipment was prepared for onward transport',
+                'The shipment has been processed in the parcel center of origin',
+                'für den Weitertransport in die Region',
             ],
             Track::STATUS_PICKUP => [
                 'Die Sendung liegt in der PACKSTATION',
@@ -245,6 +275,8 @@ class DHL extends AbstractTracker
                 'nicht in der Filiale abgeholt',
                 'The shipment is being returned',
                 'Es erfolgt eine Rücksendung',
+                'Zustellung der Sendung nicht möglich',
+                'recipient is unknown',
             ],
         ];
 
@@ -308,6 +340,6 @@ class DHL extends AbstractTracker
             'domain' => 'de',
         ], $additionalParams);
 
-        return $this->serviceEndpoint . '?' . http_build_query($urlParams);
+        return $this->serviceEndpoint . '%3F' . http_build_query($urlParams);
     }
 }

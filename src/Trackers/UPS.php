@@ -3,37 +3,45 @@
 namespace Sauladam\ShipmentTracker\Trackers;
 
 use Carbon\Carbon;
+use GuzzleHttp\Cookie\CookieJar;
 use Sauladam\ShipmentTracker\Event;
 use Sauladam\ShipmentTracker\Track;
 
 class UPS extends AbstractTracker
 {
-    /**
-     * @var string
-     */
+    /** @var string */
     protected $serviceEndpoint = 'https://www.ups.com/track/api/Track/GetStatus';
 
+    /** @var string */
     protected $descriptionLookupEndpoint = 'https://www.ups.com/track/api/WemsData/GetLookupData';
 
+    /** @var string */
     protected $trackingUrl = 'https://www.ups.com/track';
 
-    /**
-     * @var null|array
-     */
+    /** @var array */
+    protected static $cookies = [];
+
+    /** @var null|array */
     protected $descriptionLookup;
 
-    /**
-     * @var string
-     */
+    /** @var string */
     protected $language = 'de';
 
 
     protected function fetch($url)
     {
+        if (empty(static::$cookies)) {
+            $this->getCookies();
+        }
+
         try {
-            $response = $this->getDataProvider()->client->post('https://www.ups.com/track/api/Track/GetStatus', [
+            $response = $this->getDataProvider()->client->post($this->serviceUrl(), [
                 'headers' => [
                     'Content-Type' => 'application/json',
+                    'X-XSRF-TOKEN' => static::$cookies['X-XSRF-TOKEN-ST'],
+                    'Cookie' => implode(';', array_map(function ($name) {
+                        return $name . '=' . static::$cookies[$name];
+                    }, array_keys(static::$cookies))),
                 ],
                 'json' => [
                     'Locale' => $this->getLanguageQueryParam($this->language),
@@ -46,6 +54,20 @@ class UPS extends AbstractTracker
             return json_decode($response, true);
         } catch (\Exception $e) {
             throw new \Exception("Could not fetch tracking data for [{$this->parcelNumber}].");
+        }
+    }
+
+
+    protected function getCookies()
+    {
+        $this->getDataProvider()->client->request(
+            'GET', $this->trackingUrl($this->parcelNumber), [
+                'cookies' => $jar = new CookieJar,
+            ]
+        );
+
+        foreach ($jar->toArray() as $cookie) {
+            static::$cookies[$cookie['Name']] = $cookie['Value'];
         }
     }
 
@@ -69,7 +91,7 @@ class UPS extends AbstractTracker
                 'location' => $progressActivity['location'],
                 'description' => $progressActivity['activityScan'], //$this->getDescription($progressActivity),
                 'date' => $this->getDate($progressActivity),
-                'status' => $status = $this->resolveState($progressActivity['activityScan'])
+                'status' => $status = $this->resolveState($progressActivity['activityScan']),
             ]));
 
             if ($status == Track::STATUS_DELIVERED && isset($contents['trackDetails'][0]['receivedBy'])) {
@@ -84,6 +106,7 @@ class UPS extends AbstractTracker
 
         return $track->sortEvents();
     }
+
 
     protected function getDescription($activity)
     {
@@ -116,6 +139,7 @@ class UPS extends AbstractTracker
         }
     }
 
+
     protected function extractKeysAndValues($array)
     {
         return array_reduce((array)$array, function ($lookups, $value) {
@@ -147,28 +171,18 @@ class UPS extends AbstractTracker
     }
 
 
-    /**
-     * Match a shipping status from the given description.
-     *
-     * @param $statusDescription
-     *
-     * @return string
-     */
-    protected function resolveState($statusDescription)
+    protected function getStatuses()
     {
-        $statuses = [
+        return [
             Track::STATUS_PICKUP => [
                 'UPS Access Point™ possession',
                 'Beim UPS Access Point™',
                 'Delivered to UPS Access Point™',
-                'An UPS Access Point™ zugestellt'
-            ],
-            Track::STATUS_DELIVERED => [
-                'Delivered',
-                'Zugestellt'
+                'An UPS Access Point™ zugestellt',
             ],
             Track::STATUS_IN_TRANSIT => [
                 'Auftrag verarbeitet',
+                'Wird zugestellt',
                 'Ready for UPS',
                 'Scan',
                 'Out For Delivery',
@@ -182,6 +196,13 @@ class UPS extends AbstractTracker
                 'Will deliver to a nearby UPS Access Point™ for customer pick up',
                 'Zustellung wird zur Abholung durch Kunden an nahem UPS Access Point™ abgegeben',
                 'Customer was not available when UPS attempted delivery',
+                'In Einrichtung eingetroffen',
+                'Arrived at Facility',
+                'In Einrichtung eingetroffen',
+                'Departed from Facility',
+                'Hat Einrichtung verlassen',
+                'Order Processed',
+                'Auftrag verarbeitet',
             ],
             Track::STATUS_WARNING => [
                 'attempting to obtain a new delivery address',
@@ -200,9 +221,24 @@ class UPS extends AbstractTracker
                 'ltigen Zustellversuch nicht anwesend',
                 'receiver was not available at the time of the final delivery attempt',
             ],
+            Track::STATUS_DELIVERED => [
+                'Delivered',
+                'Zugestellt',
+            ],
         ];
+    }
 
-        foreach ($statuses as $status => $needles) {
+
+    /**
+     * Match a shipping status from the given description.
+     *
+     * @param $statusDescription
+     *
+     * @return string
+     */
+    protected function resolveState($statusDescription)
+    {
+        foreach ($this->getStatuses() as $status => $needles) {
             foreach ($needles as $needle) {
                 if (stripos($statusDescription, $needle) !== false) {
                     return $status;
@@ -235,6 +271,18 @@ class UPS extends AbstractTracker
         ], $additionalParams));
 
         return $this->trackingUrl . '?' . $qry;
+    }
+
+
+    public function serviceUrl($language = null)
+    {
+        $language = $language ?: $this->language;
+
+        return $this->serviceEndpoint
+            . '?'
+            . http_build_query([
+                'loc' => $this->getLanguageQueryParam($language),
+            ]);
     }
 
 
