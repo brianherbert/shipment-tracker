@@ -3,6 +3,7 @@
 namespace Sauladam\ShipmentTracker\Trackers;
 
 use Carbon\Carbon;
+use Carbon\CarbonTimeZone;
 use Sauladam\ShipmentTracker\Event;
 use Sauladam\ShipmentTracker\Track;
 
@@ -131,9 +132,15 @@ class Fedex extends AbstractTracker
      */
     protected function getDate($scanEvent)
     {
-        return Carbon::parse(
-            $this->convert("{$scanEvent['date']}T{$scanEvent['time']}{$scanEvent['gmtOffset']}")
-        );
+        $date = $scanEvent['date'];
+        $time = $scanEvent['time'];
+        $offset = $scanEvent['gmtOffset'];
+        $tz = CarbonTimeZone::create($offset);
+        $carbon = new Carbon($date.' '.$time, $tz);
+        $timestamp = $carbon->getTimestamp();
+        $carbon = new Carbon($timestamp);
+        $parsed = $carbon->toDateTimeString();
+        return $parsed;
     }
 
     /**
