@@ -13,6 +13,8 @@ class Fedex extends AbstractTracker
 
     protected $serviceEndpoint = 'https://www.fedex.com/trackingCal/track';
 
+    protected $last_offset;
+
     /**
      * Get the contents of the given url.
      *
@@ -135,11 +137,22 @@ class Fedex extends AbstractTracker
         $date = $scanEvent['date'];
         $time = $scanEvent['time'];
         $offset = $scanEvent['gmtOffset'];
+
+        if(!$offset) {
+            $offset = $this->last_offset;
+        }
+
+        if(!$offset) {
+            $offset = 'UTC';
+        }
+
         $tz = CarbonTimeZone::create($offset);
         $carbon = new Carbon($date.' '.$time, $tz);
         $timestamp = $carbon->getTimestamp();
         $carbon = new Carbon($timestamp);
         $parsed = $carbon->toDateTimeString();
+
+        $this->last_offset = $offset;
         return $parsed;
     }
 
